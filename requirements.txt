@@ -9,3 +9,6 @@ torch
 torchsummary
 scikit-learn
 ipykernel
+streamlit
+pandas
+matplotlib
