@@ -4,30 +4,49 @@ from torch.utils.data import Dataset
 import pennylane as qml
 
 
+import torch
+from torch.utils.data import Dataset
+import numpy as np
+
 class SequenceDataset(Dataset):
     def __init__(self, dataframe, target, features, sequence_length=5):
         self.features = features
         self.target = target
         self.sequence_length = sequence_length
-        self.y = torch.tensor(dataframe[self.target].values).float()
-        self.X = torch.tensor(dataframe[self.features].values).float()
+
+        # Ensure consistent float dtype for features
+        feature_data = []
+        for _, row in dataframe.iterrows():
+            row_features = []
+            for col in features:
+                val = row[col]
+                if isinstance(val, list):
+                    row_features.extend(val)  # Flatten sequence
+                else:
+                    row_features.append(val)
+            feature_data.append(row_features)
+
+        self.X = torch.tensor(feature_data, dtype=torch.float32)
+        self.y = torch.tensor(dataframe[self.target].values, dtype=torch.float32)
 
     def __len__(self):
-        return self.X.shape[0]
+        return len(self.X)
 
     def __getitem__(self, i):
         if i >= self.sequence_length - 1:
             i_start = i - self.sequence_length + 1
-            x = self.X[i_start : (i + 1), :]
+            x = self.X[i_start : i + 1]
         else:
             padding = self.X[0].repeat(self.sequence_length - i - 1, 1)
-            x = self.X[0 : (i + 1), :]
+            x = self.X[0 : i + 1]
             x = torch.cat((padding, x), 0)
 
         return x, self.y[i]
 
-
 # Classical LSTM
+import torch
+import torch.nn as nn
+
 class ShallowRegressionLSTM(nn.Module):
     def __init__(self, num_sensors, hidden_units, num_layers=1):
         super().__init__()
@@ -46,19 +65,12 @@ class ShallowRegressionLSTM(nn.Module):
 
     def forward(self, x):
         batch_size = x.shape[0]
-        h0 = torch.zeros(
-            self.num_layers, batch_size, self.hidden_units
-        ).requires_grad_()
-        c0 = torch.zeros(
-            self.num_layers, batch_size, self.hidden_units
-        ).requires_grad_()
+        h0 = torch.zeros(self.num_layers, batch_size, self.hidden_units).to(x.device)
+        c0 = torch.zeros(self.num_layers, batch_size, self.hidden_units).to(x.device)
 
         _, (hn, _) = self.lstm(x, (h0, c0))
-        out = self.linear(
-            hn[0]
-        ).flatten()  # First dim of Hn is num_layers, which is set to 1 above.
-
-        return out
+        out = self.linear(hn[0]).flatten()  # shape: (batch,)
+        return torch.sigmoid(out)  # ensure output is in (0, 1) range
 
 
 # Quantum LSTM
@@ -104,15 +116,14 @@ class QLSTM(nn.Module):
         # self.dev_output = qml.device(self.backend, wires=self.n_qubits)
 
         def ansatz(params, wires_type):
-            # Entangling layer.
-            for i in range(1, 3):
-                for j in range(self.n_qubits):
-                    if j + i < self.n_qubits:
-                        qml.CNOT(wires=[wires_type[j], wires_type[j + i]])
-                    else:
-                        qml.CNOT(
-                            wires=[wires_type[j], wires_type[j + i - self.n_qubits]]
-                        )
+    # Entangling layer.
+    for i in range(1, 3):
+        for j in range(self.n_qubits):
+            control = wires_type[j]
+            target = wires_type[(j + i) % self.n_qubits]
+            if control != target:  # Avoid same wire
+                qml.CNOT(wires=[control, target])
+
 
             # Variational layer.
             for i in range(self.n_qubits):
