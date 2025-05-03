@@ -116,20 +116,29 @@ class QLSTM(nn.Module):
         # self.dev_output = qml.device(self.backend, wires=self.n_qubits)
 
         def ansatz(params, wires_type):
-    # Entangling layer.
-    for i in range(1, 3):
-        for j in range(self.n_qubits):
-            control = wires_type[j]
-            target = wires_type[(j + i) % self.n_qubits]
-            if control != target:  # Avoid same wire
-                qml.CNOT(wires=[control, target])
+            # Entangling layer.
+            # ✅ Safe entangling layer — avoids using same qubit as control and target
+            def ansatz(params, wires_type):
+    # Safe entangling layer
+            # Safer entanglement to avoid CNOT with same wires
+                def ansatz(params, wires_type):
+        # ✅ Safe CNOT chain
+                    for i in range(self.n_qubits - 1):
+                        qml.CNOT(wires=[wires_type[i], wires_type[i + 1]])
 
-
-            # Variational layer.
+            # Variational layer
             for i in range(self.n_qubits):
                 qml.RX(params[0][i], wires=wires_type[i])
                 qml.RY(params[1][i], wires=wires_type[i])
                 qml.RZ(params[2][i], wires=wires_type[i])
+
+
+            # Variational layer
+            for i in range(self.n_qubits):
+                qml.RX(params[0][i], wires=wires_type[i])
+                qml.RY(params[1][i], wires=wires_type[i])
+                qml.RZ(params[2][i], wires=wires_type[i])
+
 
         def VQC(features, weights, wires_type):
             # Preproccess input data to encode the initial state.
@@ -238,11 +247,10 @@ class QLSTM(nn.Module):
         hidden_seq = hidden_seq.transpose(0, 1).contiguous()
         return hidden_seq, (h_t, c_t)
 
-
 class QShallowRegressionLSTM(nn.Module):
     def __init__(self, num_sensors, hidden_units, n_qubits=0, n_qlayers=1):
         super().__init__()
-        self.num_sensors = num_sensors  # this is the number of features
+        self.num_sensors = num_sensors  # number of features
         self.hidden_units = hidden_units
         self.num_layers = 1
 
@@ -266,8 +274,8 @@ class QShallowRegressionLSTM(nn.Module):
         ).requires_grad_()
 
         _, (hn, _) = self.lstm(x, (h0, c0))
-        out = self.linear(
-            hn
-        ).flatten()  # First dim of Hn is num_layers, which is set to 1 above.
+        out = self.linear(hn).flatten()
 
-        return out
+        # ✅ Return sigmoid output for binary classification
+        return torch.sigmoid(out)
+
