@@ -10,6 +10,7 @@ import numpy as np
 
 class SequenceDataset(Dataset):
     def __init__(self, dataframe, target, features, sequence_length=5):
+        self.dataframe = dataframe  # ✅ required for __getitem__
         self.features = features
         self.target = target
         self.sequence_length = sequence_length
@@ -32,18 +33,26 @@ class SequenceDataset(Dataset):
     def __len__(self):
         return len(self.X)
 
-    def __getitem__(self, i):
-        if i >= self.sequence_length - 1:
-            i_start = i - self.sequence_length + 1
-            x = self.X[i_start : i + 1]
-        else:
-            padding = self.X[0].repeat(self.sequence_length - i - 1, 1)
-            x = self.X[0 : i + 1]
-            x = torch.cat((padding, x), 0)
+    def __getitem__(self, idx):
+        row = self.dataframe.iloc[idx]
+        row_features = []
 
-        return x, self.y[i]
+        for col in self.features:
+            val = row[col]
+            if isinstance(val, list):
+                row_features.extend(val)  # Already a list → flatten
+            elif isinstance(val, str) and val.startswith("["):
+                # Convert stringified list → list of floats
+                val = [float(x.strip()) for x in val.strip("[]").split(",")]
+                row_features.extend(val)
+            else:
+                row_features.append(float(val))  # Single scalar value
 
-# Classical LSTM
+        return torch.tensor(row_features, dtype=torch.float32), self.y[idx]
+
+
+
+#classical lstm
 import torch
 import torch.nn as nn
 
